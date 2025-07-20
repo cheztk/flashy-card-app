@@ -79,7 +79,10 @@ export async function updateDeck(deckId: number, data: { title?: string; descrip
   }
   
   const updatedDeck = await db.update(decksTable)
-    .set(data)
+    .set({
+      ...data,
+      updatedAt: new Date()
+    })
     .where(
       and(
         eq(decksTable.id, deckId),

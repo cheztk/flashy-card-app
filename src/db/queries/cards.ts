@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from '@/db';
 import { cardsTable, decksTable } from '@/db/schema';
-import { eq, and, count } from 'drizzle-orm';
+import { eq, and, count, desc } from 'drizzle-orm';
 
 export async function getCardsByDeckId(deckId: number) {
   const { userId } = await auth();
@@ -27,7 +27,7 @@ export async function getCardsByDeckId(deckId: number) {
   return await db.select()
     .from(cardsTable)
     .where(eq(cardsTable.deckId, deckId))
-    .orderBy(cardsTable.createdAt);
+    .orderBy(desc(cardsTable.updatedAt));
 }
 
 export async function getCardById(cardId: number) {
@@ -102,7 +102,10 @@ export async function updateCard(cardId: number, data: { front?: string; back?: 
   }
   
   const updatedCard = await db.update(cardsTable)
-    .set(data)
+    .set({
+      ...data,
+      updatedAt: new Date()
+    })
     .where(eq(cardsTable.id, cardId))
     .returning();
     
