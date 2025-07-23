@@ -1,6 +1,6 @@
 "use server";
 
-import { createCard, updateCard, deleteCard, updateDeck } from '@/db/queries';
+import { createCard, updateCard, deleteCard, updateDeck, deleteDeck } from '@/db/queries';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 
@@ -93,5 +93,24 @@ export async function updateDeckAction(input: UpdateDeckInput) {
       return { success: false, error: error.issues.map((e) => e.message).join(', ') };
     }
     return { success: false, error: 'Failed to update deck' };
+  }
+} 
+
+export async function deleteDeckAction(deckId: number) {
+  try {
+    // Validate deckId
+    if (!deckId || isNaN(deckId) || deckId <= 0) {
+      throw new Error(`Invalid deck ID: ${deckId}`);
+    }
+    
+    await deleteDeck(deckId);
+    
+    // Return success without revalidating (since we're navigating away)
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting deck:', error);
+    
+    // Re-throw the original error message for better debugging
+    throw new Error(error instanceof Error ? error.message : 'Failed to delete deck');
   }
 } 

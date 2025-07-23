@@ -9,24 +9,24 @@ export async function getCardsByDeckId(deckId: number) {
     throw new Error("Unauthorized");
   }
   
-  // First verify the deck belongs to the user
-  const deck = await db.select()
-    .from(decksTable)
+  // Get cards but only for decks belonging to the user
+  // This ensures security while being more efficient
+  return await db.select({
+    id: cardsTable.id,
+    deckId: cardsTable.deckId,
+    front: cardsTable.front,
+    back: cardsTable.back,
+    createdAt: cardsTable.createdAt,
+    updatedAt: cardsTable.updatedAt,
+  })
+    .from(cardsTable)
+    .innerJoin(decksTable, eq(cardsTable.deckId, decksTable.id))
     .where(
       and(
-        eq(decksTable.id, deckId),
+        eq(cardsTable.deckId, deckId),
         eq(decksTable.userId, userId)
       )
     )
-    .limit(1);
-    
-  if (!deck.length) {
-    throw new Error("Deck not found or unauthorized");
-  }
-  
-  return await db.select()
-    .from(cardsTable)
-    .where(eq(cardsTable.deckId, deckId))
     .orderBy(desc(cardsTable.updatedAt));
 }
 

@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { CardsList } from './components/CardsList';
 import { AddCardDialog } from './components/AddCardDialog';
 import { EditDeckDialog } from './components/EditDeckDialog';
+import { DeleteDeckDialog } from './components/DeleteDeckDialog';
 import Link from 'next/link';
 
 interface DeckPageProps {
@@ -72,6 +73,10 @@ export default async function DeckPage({ params }: DeckPageProps) {
                 deckId={deckIdNum} 
                 currentTitle={deck.title}
                 currentDescription={deck.description || undefined}
+              />
+              <DeleteDeckDialog 
+                deckId={deckIdNum}
+                deckTitle={deck.title}
               />
             </div>
           </CardContent>
