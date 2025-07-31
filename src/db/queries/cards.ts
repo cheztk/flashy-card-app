@@ -138,16 +138,3 @@ export async function deleteCard(cardId: number) {
     .where(eq(cardsTable.id, cardId));
 }
 
-export async function getTotalCardCount() {
-  const { userId } = await auth();
-  if (!userId) {
-    throw new Error("Unauthorized");
-  }
-  
-  const result = await db.select({ count: count() })
-    .from(cardsTable)
-    .innerJoin(decksTable, eq(cardsTable.deckId, decksTable.id))
-    .where(eq(decksTable.userId, userId));
-    
-  return result[0]?.count || 0;
-} 

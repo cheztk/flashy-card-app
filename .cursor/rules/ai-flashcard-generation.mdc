@@ -1,0 +1,361 @@
+---
+alwaysApply: true
+---
+
+# AI Flashcard Generation with Vercel AI
+
+## Overview
+This project uses the **Vercel AI SDK** (`ai` npm package) for AI-powered flashcard generation. All AI features are **Pro-only** and must be properly protected with Clerk billing checks.
+
+## Core Dependencies
+```json
+{
+  "ai": "^3.x.x",
+  "openai": "^4.x.x", 
+  "zod": "^3.x.x"
+}
+```
+
+## Required Imports
+```typescript
+import { generateObject } from 'ai';
+import { openai } from 'ai/openai';
+import { z } from 'zod';
+import { auth } from '@clerk/nextjs/server';
+```
+
+## Flashcard Generation Schema
+**MANDATORY**: Use this exact Zod schema for flashcard generation:
+
+```typescript
+const FlashcardGenerationSchema = z.object({
+  flashcards: z.array(
+    z.object({
+      front: z.string().min(1, "Front content required"),
+      back: z.string().min(1, "Back content required"),
+    })
+  ).min(1, "At least one flashcard required").max(50, "Maximum 50 flashcards per generation"),
+});
+
+type FlashcardGeneration = z.infer<typeof FlashcardGenerationSchema>;
+```
+
+## Complete Server Action Pattern
+**MANDATORY**: All AI generation must follow this exact pattern:
+
+```typescript
+"use server";
+
+import { generateObject } from 'ai';
+import { openai } from 'ai/openai';
+import { auth } from '@clerk/nextjs/server';
+import { z } from 'zod';
+import { createCard } from '@/db/queries';
+
+const GenerateFlashcardsSchema = z.object({
+  deckId: z.string().uuid(),
+  prompt: z.string().min(10, "Prompt must be at least 10 characters"),
+  count: z.number().min(1).max(50).default(10),
+});
+
+const FlashcardGenerationSchema = z.object({
+  flashcards: z.array(
+    z.object({
+      front: z.string().min(1),
+      back: z.string().min(1),
+    })
+  ),
+});
+
+type GenerateFlashcardsInput = z.infer<typeof GenerateFlashcardsSchema>;
+
+export async function generateFlashcardsAction(input: GenerateFlashcardsInput) {
+  // 1. Validate input
+  const validatedInput = GenerateFlashcardsSchema.parse(input);
+  
+  // 2. Check authentication
+  const { has, userId } = await auth();
+  if (!userId) {
+    throw new Error("Unauthorized");
+  }
+  
+  // 3. CHECK AI FEATURE ACCESS (MANDATORY)
+  const hasAIFeature = has({ feature: 'ai_flashcard_generation' });
+  if (!hasAIFeature) {
+    throw new Error("AI flashcard generation requires a Pro subscription");
+  }
+  
+  // 4. Verify deck ownership
+  const deck = await getDeckById(validatedInput.deckId);
+  if (!deck) {
+    throw new Error("Deck not found or unauthorized");
+  }
+  
+  try {
+    // 5. Generate flashcards with AI
+    const { object } = await generateObject({
+      model: openai('gpt-4o-mini'), // Use cost-effective model
+      schema: FlashcardGenerationSchema,
+      prompt: `Generate exactly ${validatedInput.count} flashcards based on this topic: "${validatedInput.prompt}". 
+               Create educational flashcards with clear questions on the front and concise answers on the back.
+               Make them suitable for studying and memorization.`,
+      temperature: 0.7, // Balance creativity and consistency
+    });
+    
+    // 6. Save generated cards to database
+    const createdCards = [];
+    for (const flashcard of object.flashcards) {
+      const card = await createCard({
+        deckId: validatedInput.deckId,
+        front: flashcard.front,
+        back: flashcard.back,
+      });
+      createdCards.push(card);
+    }
+    
+    return {
+      success: true,
+      cardsCreated: createdCards.length,
+      cards: createdCards,
+    };
+    
+  } catch (error) {
+    console.error('AI Generation Error:', error);
+    
+    // Handle specific AI errors
+    if (error instanceof Error) {
+      if (error.message.includes('rate limit')) {
+        throw new Error("AI service is temporarily busy. Please try again in a moment.");
+      }
+      if (error.message.includes('content policy')) {
+        throw new Error("Unable to generate content for this topic. Please try a different subject.");
+      }
+    }
+    
+    throw new Error("Failed to generate flashcards. Please try again.");
+  }
+}
+```
+
+## Model Configuration
+**RECOMMENDED**: Use these model settings for flashcard generation:
+
+```typescript
+// Cost-effective for most use cases
+model: openai('gpt-4o-mini')
+
+// For higher quality (premium feature)
+model: openai('gpt-4o')
+
+// Configuration
+temperature: 0.7, // Balance creativity with consistency
+maxTokens: 2000,  // Sufficient for 10-20 flashcards
+```
+
+## Client Component Integration
+**MANDATORY**: Protect AI features in client components:
+
+```typescript
+"use client";
+
+import { Protect } from '@clerk/nextjs';
+import { Button } from '@/components/ui/button';
+import { generateFlashcardsAction } from './actions';
+
+export function AIGenerateButton({ deckId }: { deckId: string }) {
+  const handleGenerate = async () => {
+    try {
+      await generateFlashcardsAction({
+        deckId,
+        prompt: "Basic math concepts",
+        count: 10,
+      });
+      // Handle success (refresh, toast, etc.)
+    } catch (error) {
+      // Handle error (toast notification)
+    }
+  };
+
+  return (
+    <Protect
+      feature="ai_flashcard_generation"
+      fallback={
+        <Button disabled variant="outline">
+          AI Generation (Pro Only)
+        </Button>
+      }
+    >
+      <Button onClick={handleGenerate}>
+        Generate with AI
+      </Button>
+    </Protect>
+  );
+}
+```
+
+## Error Handling Patterns
+**MANDATORY**: Handle these specific error types:
+
+```typescript
+try {
+  const result = await generateObject({...});
+} catch (error) {
+  // Rate limiting
+  if (error.message.includes('rate limit')) {
+    throw new Error("AI service busy, try again shortly");
+  }
+  
+  // Content policy violations  
+  if (error.message.includes('content policy')) {
+    throw new Error("Unable to generate content for this topic");
+  }
+  
+  // Network/API errors
+  if (error.message.includes('network')) {
+    throw new Error("Connection issue, please try again");
+  }
+  
+  // Generic fallback
+  throw new Error("AI generation failed, please try again");
+}
+```
+
+## Prompt Engineering Guidelines
+**BEST PRACTICES** for effective flashcard prompts:
+
+```typescript
+// ✅ GOOD: Specific, educational prompts
+const prompt = `Generate exactly ${count} flashcards about ${topic}. 
+                Create clear questions on the front and concise answers on the back.
+                Focus on key concepts and facts that are important for learning.`;
+
+// ✅ GOOD: Subject-specific prompts  
+const prompt = `Create ${count} flashcards for studying ${subject}.
+                Include definitions, examples, and key relationships.
+                Make questions specific and answers educational.`;
+
+// ❌ BAD: Vague or inappropriate prompts
+const prompt = "Make some cards about stuff";
+const prompt = "Generate flashcards about controversial topics";
+```
+
+## Integration with Existing Patterns
+
+### Server Action Integration
+```typescript
+// Must use centralized query functions
+import { createCard, getDeckById } from '@/db/queries';
+
+// Must validate with Zod
+const validatedInput = GenerateFlashcardsSchema.parse(input);
+
+// Must check authentication  
+const { userId } = await auth();
+if (!userId) throw new Error("Unauthorized");
+```
+
+### Billing Integration
+```typescript
+// Must check AI feature access
+const { has } = await auth();
+const hasAIFeature = has({ feature: 'ai_flashcard_generation' });
+if (!hasAIFeature) {
+  throw new Error("AI flashcard generation requires a Pro subscription");
+}
+```
+
+### Database Integration  
+```typescript
+// Save generated cards using centralized query functions
+for (const flashcard of object.flashcards) {
+  await createCard({
+    deckId: validatedInput.deckId,
+    front: flashcard.front,
+    back: flashcard.back,
+  });
+}
+```
+
+## Environment Variables
+**REQUIRED**: Set these environment variables:
+
+```env
+OPENAI_API_KEY=your_openai_api_key
+```
+
+## Cost Optimization
+**IMPORTANT**: Implement these cost controls:
+
+```typescript
+// 1. Use cost-effective models
+model: openai('gpt-4o-mini'), // ~$0.0001/1K tokens
+
+// 2. Limit generation count
+count: z.number().min(1).max(50), // Max 50 per generation
+
+// 3. Reasonable token limits
+maxTokens: 2000, // Sufficient for most flashcard sets
+
+// 4. Cache common prompts (if implementing)
+// 5. Rate limiting per user (if needed)
+```
+
+## Security & Content Safety
+**MANDATORY**: Implement content filtering:
+
+```typescript
+// 1. Validate prompts before sending to AI
+const isValidPrompt = (prompt: string) => {
+  const prohibited = ['inappropriate', 'harmful', 'illegal'];
+  return !prohibited.some(word => prompt.toLowerCase().includes(word));
+};
+
+// 2. Handle content policy violations gracefully
+if (error.message.includes('content policy')) {
+  throw new Error("Unable to generate content for this topic. Please try a different subject.");
+}
+
+// 3. Log failed generations for monitoring
+console.error('AI Generation Failed:', { userId, prompt: validatedInput.prompt, error });
+```
+
+## Testing AI Features
+**DEVELOPMENT**: Use these patterns for testing:
+
+```typescript
+// Mock AI responses in development
+if (process.env.NODE_ENV === 'development') {
+  return {
+    object: {
+      flashcards: [
+        { front: "Test Question 1", back: "Test Answer 1" },
+        { front: "Test Question 2", back: "Test Answer 2" },
+      ]
+    }
+  };
+}
+```
+
+## FORBIDDEN Practices
+❌ **NEVER DO THESE:**
+1. Generate AI content without Pro subscription check
+2. Skip input validation with Zod
+3. Use expensive models without user consent  
+4. Generate unlimited flashcards without limits
+5. Expose OpenAI API keys in client code
+6. Skip error handling for AI operations
+7. Generate content without user authentication
+8. Use AI generation outside of server actions
+
+## Integration Checklist
+✅ **BEFORE IMPLEMENTING AI FEATURES:**
+- [ ] Billing protection with `has({ feature: 'ai_flashcard_generation' })`
+- [ ] Input validation with Zod schemas
+- [ ] User authentication checks
+- [ ] Proper error handling and user feedback
+- [ ] Cost controls (model selection, token limits)
+- [ ] Content safety measures
+- [ ] Integration with existing query functions
+- [ ] Client-side protection with `<Protect>` component
+
+**REMEMBER**: AI features are premium functionality that must be properly protected, validated, and integrated with the existing authentication and billing systems.
